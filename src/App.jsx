@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, 
@@ -7,92 +7,144 @@ import {
   onSnapshot, 
   addDoc, 
   deleteDoc,
-  updateDoc 
+  updateDoc,
+  query,
+  orderBy
 } from 'firebase/firestore';
 import { 
   getAuth, 
   signInAnonymously, 
-  signInWithCustomToken,
+  signInWithCustomToken, 
   onAuthStateChanged 
 } from 'firebase/auth';
 import { 
   Plus, 
   Trash2, 
+  Edit3, 
   Package, 
   Image as ImageIcon, 
+  Video, 
   X,
   Search,
+  Share2,
   Lock,
   Unlock,
+  Upload,
+  Link as LinkIcon,
   Loader2,
   ChevronLeft,
   ChevronRight,
   ArrowLeft,
-  Edit
+  PlayCircle,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 
-// --- FİREBASE YAPILANDIRMASI ---
-// API Key boş bırakılmalıdır, ortam tarafından otomatik sağlanır.
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "", 
-      authDomain: "katalog-4212a.firebaseapp.com",
-      projectId: "katalog-4212a",
-      storageBucket: "katalog-4212a.firebasestorage.app",
-      messagingSenderId: "827488717873",
-      appId: "1:827488717873:web:15da360c29b5e6cf11d910"
-    };
-
+const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'katalog-4212a';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'portfolio-advanced-v3';
 
-const ADMIN_PASSWORD = "1234";
+const ADMIN_PASSWORD = "1234"; 
 
-// --- YARDIMCI BİLEŞENLER ---
+// --- Yardımcı Fonksiyonlar ---
+
+const formatPrice = (val) => {
+  if (!val) return '';
+  const number = val.toString().replace(/\D/g, '');
+  return number.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+};
+
+// Yaklaşık veri boyutu hesaplama (byte cinsinden)
+const calculateDataSize = (data) => {
+  return new TextEncoder().encode(JSON.stringify(data)).length;
+};
+
 const MediaSlider = ({ items = [], onCardClick }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+
   if (!items || items.length === 0) return (
-    <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-400" onClick={onCardClick}>
-      <ImageIcon size={32} strokeWidth={1} />
+    <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
+      <ImageIcon className="w-12 h-12" />
     </div>
   );
 
+  const next = (e) => {
+    e.stopPropagation();
+    setCurrentIndex((prev) => (prev + 1) % items.length);
+  };
+
+  const prev = (e) => {
+    e.stopPropagation();
+    setCurrentIndex((prev) => (prev - 1 + items.length) % items.length);
+  };
+
+  const currentItem = items[currentIndex];
+
   return (
-    <div className="relative w-full h-full group bg-black" onClick={onCardClick}>
-      <img 
-        src={items[currentIndex]?.url} 
-        className="w-full h-full object-cover transition-opacity duration-300" 
-        alt="Ürün"
-      />
-      {items.length > 1 && (
-        <div className="absolute inset-0 flex items-center justify-between px-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={(e) => { e.stopPropagation(); setCurrentIndex((prev) => (prev - 1 + items.length) % items.length); }} className="bg-white/80 p-1 rounded-full text-slate-800"><ChevronLeft size={16}/></button>
-          <button onClick={(e) => { e.stopPropagation(); setCurrentIndex((prev) => (prev + 1) % items.length); }} className="bg-white/80 p-1 rounded-full text-slate-800"><ChevronRight size={16}/></button>
+    <div className="relative w-full h-full group overflow-hidden" onClick={onCardClick}>
+      {currentItem.type === 'video' ? (
+        <div className="w-full h-full bg-black flex items-center justify-center">
+          <video src={currentItem.url} className="w-full h-full object-cover opacity-60" muted />
+          <PlayCircle className="absolute w-12 h-12 text-white opacity-80" />
         </div>
+      ) : (
+        <img 
+          src={currentItem.url} 
+          alt="Medya" 
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          onError={(e) => { e.target.src = "https://via.placeholder.com/400x300?text=Resim+Yuklenemedi"; }}
+        />
+      )}
+
+      {items.length > 1 && (
+        <>
+          <button onClick={prev} className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 backdrop-blur-md p-1.5 rounded-full text-white transition-all opacity-0 group-hover:opacity-100">
+            <ChevronLeft size={20} />
+          </button>
+          <button onClick={next} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 backdrop-blur-md p-1.5 rounded-full text-white transition-all opacity-0 group-hover:opacity-100">
+            <ChevronRight size={20} />
+          </button>
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1">
+            {items.map((_, i) => (
+              <div key={i} className={`h-1 rounded-full transition-all ${i === currentIndex ? 'w-4 bg-white' : 'w-1 bg-white/50'}`} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
 };
 
-// --- ANA UYGULAMA ---
 const App = () => {
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
   const [view, setView] = useState({ type: 'list', data: null });
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [pass, setPass] = useState('');
-  
-  // Form Durumu
-  const [formData, setFormData] = useState({ title: '', code: '', price: '', desc: '', media: [] });
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
 
-  // Kimlik Doğrulama Başlatma
+  const [formData, setFormData] = useState({
+    title: '',
+    code: '',
+    price: '',
+    description: '',
+    media: [],
+  });
+
+  // Mevcut form boyutunu hesapla
+  const currentSize = calculateDataSize(formData);
+  const sizeLimit = 1000000; // ~1MB
+  const sizePercentage = Math.min((currentSize / sizeLimit) * 100, 100);
+
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -101,276 +153,406 @@ const App = () => {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (error) {
-        console.error("Auth error:", error);
+      } catch (err) {
+        console.error("Auth hatası:", err);
       }
     };
     initAuth();
-    const unsubAuth = onAuthStateChanged(auth, setUser);
-    return () => unsubAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
   }, []);
 
-  // Veri Dinleme
   useEffect(() => {
     if (!user) return;
-    
-    // KURAL: Her zaman /artifacts/{appId}/public/data/{collection} yolunu kullanın
     const productsRef = collection(db, 'artifacts', appId, 'public', 'data', 'products');
-    
-    const unsub = onSnapshot(productsRef, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // KURAL: Karmaşık sorgular yerine JS belleğinde sıralama yapın
-      setProducts(data.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
-      setLoading(false);
+    const unsubscribe = onSnapshot(productsRef, (snapshot) => {
+      setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setIsLoading(false);
     }, (error) => {
-      console.error("Firestore error:", error);
-      setLoading(false);
+      console.error("Firestore Hatası:", error);
+      setIsLoading(false);
     });
-    
-    return () => unsub();
+    return () => unsubscribe();
   }, [user]);
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    if (!user) return;
-
-    const docData = { 
-      ...formData, 
-      updatedAt: new Date().toISOString() 
-    };
-
-    try {
-      if (formData.id) {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'products', formData.id);
-        await updateDoc(docRef, docData);
-      } else {
-        const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'products');
-        await addDoc(colRef, { 
-          ...docData, 
-          createdAt: new Date().toISOString() 
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Ürün Kataloğu',
+          text: 'Ürünlerimize göz atın!',
+          url: window.location.href,
         });
-      }
-      setIsModalOpen(false);
-      setFormData({ title: '', code: '', price: '', desc: '', media: [] });
-    } catch (error) {
-      console.error("Save error:", error);
-      alert("Kaydedilirken bir hata oluştu.");
+      } catch (err) { console.error(err); }
+    } else {
+      const dummy = document.createElement("input");
+      document.body.appendChild(dummy);
+      dummy.value = window.location.href;
+      dummy.select();
+      document.execCommand("copy");
+      document.body.removeChild(dummy);
+      alert("Link kopyalandı!");
     }
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-600" size={32} /></div>;
+  const compressImage = (base64Str) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 600; // Daha küçük genişlik
+        let width = img.width;
+        let height = img.height;
+        if (width > MAX_WIDTH) {
+          height *= MAX_WIDTH / width;
+          width = MAX_WIDTH;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.4)); // Daha yüksek sıkıştırma (0.4)
+      };
+    });
+  };
 
-  const filtered = products.filter(p => 
-    (p.title?.toLowerCase() || "").includes(searchTerm.toLowerCase()) || 
-    (p.code?.toLowerCase() || "").includes(searchTerm.toLowerCase())
+  const handleFileUpload = async (e, type) => {
+    const files = Array.from(e.target.files);
+    
+    // Boyut kontrolü
+    if (currentSize > sizeLimit * 0.9) {
+      alert("Ürün kapasitesi dolmak üzere! Lütfen bazı medyaları silin veya link kullanın.");
+      return;
+    }
+
+    setIsUploading(true);
+    for (const file of files) {
+      if (type === 'video' && file.size > 800000) { // Video için çok daha sıkı sınır
+        alert("Video dosyası çok büyük! 800KB altı videolar yükleyebilir veya link ekleyebilirsiniz.");
+        continue;
+      }
+      
+      const reader = new FileReader();
+      const loadPromise = new Promise(resolve => {
+        reader.onloadend = async () => {
+          let finalUrl = reader.result;
+          if (type === 'image') finalUrl = await compressImage(reader.result);
+          
+          setFormData(prev => {
+            const newMedia = [...prev.media, { url: finalUrl, type }];
+            if (calculateDataSize({...prev, media: newMedia}) > sizeLimit) {
+              alert("Bu dosya eklendiğinde 1MB sınırı aşılıyor! İşlem iptal edildi.");
+              return prev;
+            }
+            return { ...prev, media: newMedia };
+          });
+          resolve();
+        };
+      });
+      reader.readAsDataURL(file);
+      await loadPromise;
+    }
+    setIsUploading(false);
+  };
+
+  const addMediaByLink = (type) => {
+    const url = prompt(`${type === 'image' ? 'Resim' : 'Video'} URL adresini girin:`);
+    if (url) {
+      setFormData(prev => ({
+        ...prev,
+        media: [...prev.media, { url, type }]
+      }));
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+
+    if (currentSize > sizeLimit) {
+      alert("Hata: Ürün verisi 1MB sınırını aşıyor. Lütfen bazı görselleri çıkarın.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    const productsRef = collection(db, 'artifacts', appId, 'public', 'data', 'products');
+    
+    try {
+      if (editingProduct) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', editingProduct.id), formData);
+      } else {
+        await addDoc(productsRef, { ...formData, createdAt: new Date().toISOString() });
+      }
+      
+      setShowSuccessToast(true);
+      setTimeout(() => {
+        setShowSuccessToast(false);
+        closeModal();
+      }, 1500);
+
+    } catch (err) {
+      console.error(err);
+      alert("Kritik Hata: Veri boyutu hala çok büyük. Lütfen daha az veya daha küçük görseller kullanın.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingProduct(null);
+    setFormData({ title: '', code: '', price: '', description: '', media: [] });
+  };
+
+  const filteredProducts = products.filter(p => 
+    p.title?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    p.code?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-indigo-600 w-10 h-10" /></div>;
+
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      {/* Başlık */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-2 font-bold text-xl tracking-tight cursor-pointer" onClick={() => setView({type:'list'})}>
-          <div className="bg-blue-600 text-white p-2 rounded-lg"><Package size={20}/></div>
-          PREMIUM KATALOG
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-10 font-sans">
+      {/* Başarı Mesajı */}
+      {showSuccessToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-green-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-2 animate-in fade-in zoom-in duration-300">
+          <CheckCircle2 size={20} />
+          <span className="font-bold">Ürün Başarıyla Kaydedildi!</span>
         </div>
-        <button 
-          onClick={() => isAdmin ? setIsAdmin(false) : setShowLogin(true)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${isAdmin ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-600'}`}
-        >
-          {isAdmin ? <Lock size={14}/> : <Unlock size={14}/>}
-          {isAdmin ? 'Çıkış' : 'Panel'}
-        </button>
-      </header>
+      )}
+
+      {/* Navbar */}
+      <nav className="bg-white/80 backdrop-blur-md border-b sticky top-0 z-50 px-4 h-16 flex justify-between items-center">
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView({ type: 'list', data: null })}>
+          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-100">
+            <Package className="text-white" size={24} />
+          </div>
+          <span className="font-black text-xl tracking-tight">DİJİTAL KATALOG</span>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={handleShare} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><Share2 size={20} /></button>
+          <button onClick={() => isAdminLoggedIn ? setIsAdminLoggedIn(false) : setShowLoginModal(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            {isAdminLoggedIn ? <Lock className="text-red-500" size={20} /> : <Unlock size={20} />}
+          </button>
+        </div>
+      </nav>
 
       {view.type === 'list' ? (
-        <main className="max-w-7xl mx-auto p-6">
-          <div className="flex flex-col md:flex-row gap-4 mb-8">
-            <div className="relative flex-grow">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                className="w-full pl-12 pr-4 py-3 bg-white border rounded-2xl outline-none focus:ring-2 ring-blue-100 transition-all"
-                placeholder="Ürün veya kod ara..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-              />
-            </div>
-            {isAdmin && (
-              <button 
-                onClick={() => { setFormData({title:'', code:'', price:'', desc:'', media:[]}); setIsModalOpen(true); }}
-                className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-100"
-              >
-                <Plus size={20}/> YENİ EKLE
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {filtered.map(p => (
-              <div key={p.id} className="bg-white rounded-3xl overflow-hidden border border-slate-100 hover:shadow-xl transition-all group">
-                <div className="aspect-square">
-                  <MediaSlider items={p.media} onCardClick={() => setView({type:'detail', data:p})} />
-                </div>
-                <div className="p-4">
-                  <div className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">{p.code || 'KODSUZ'}</div>
-                  <h3 className="font-bold text-slate-800 line-clamp-1 mb-2">{p.title}</h3>
-                  <div className="flex justify-between items-center">
-                    <span className="font-black text-lg">{p.price} ₺</span>
-                    {isAdmin && (
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => { setFormData(p); setIsModalOpen(true); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit size={16}/></button>
-                        <button onClick={async () => {
-                          if (confirm('Silinsin mi?')) {
-                            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', p.id));
-                          }
-                        }} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+        <>
+          <header className="max-w-7xl mx-auto px-4 py-12 text-center">
+            <h1 className="text-4xl sm:text-5xl font-black mb-4 tracking-tight">Koleksiyonu Keşfedin</h1>
+            <p className="text-slate-500 mb-10 max-w-xl mx-auto">En yeni tasarımlarımız ve ürünlerimiz tek bir yerde.</p>
+            <div className="flex flex-col sm:flex-row gap-4 max-w-2xl mx-auto">
+              <div className="relative flex-1 text-left">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input 
+                  placeholder="Ürün adı veya kodu ile arayın..." 
+                  className="w-full pl-12 pr-4 py-4 rounded-2xl border-none bg-white shadow-sm focus:ring-2 focus:ring-indigo-500 transition-all"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
               </div>
-            ))}
-          </div>
-          {filtered.length === 0 && !loading && (
-            <div className="text-center py-20 text-slate-400">Ürün bulunamadı.</div>
-          )}
-        </main>
-      ) : (
-        <main className="max-w-4xl mx-auto p-6 animate-in fade-in duration-500">
-          <button onClick={() => setView({type:'list'})} className="flex items-center gap-2 text-slate-400 font-bold text-xs mb-8 hover:text-blue-600 transition-colors">
-            <ArrowLeft size={16}/> LİSTEYE DÖN
-          </button>
-          <div className="grid md:grid-cols-2 gap-12">
-            <div className="space-y-4">
-              {view.data.media?.map((m, i) => (
-                <img key={i} src={m.url} className="w-full rounded-3xl shadow-lg border border-slate-100" alt={view.data.title} />
-              ))}
-              {(!view.data.media || view.data.media.length === 0) && (
-                <div className="aspect-square bg-slate-100 rounded-3xl flex items-center justify-center text-slate-300">
-                  <ImageIcon size={64} strokeWidth={1} />
-                </div>
+              {isAdminLoggedIn && (
+                <button onClick={() => setIsModalOpen(true)} className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 hover:scale-105 active:scale-95 transition-all">
+                  <Plus size={20} /> Yeni Ürün
+                </button>
               )}
             </div>
+          </header>
+
+          <main className="max-w-7xl mx-auto px-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+            {filteredProducts.map(product => (
+              <div key={product.id} className="bg-white rounded-[2.5rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 border border-slate-100 flex flex-col group">
+                <div className="aspect-[4/3] bg-slate-100 relative">
+                  <MediaSlider 
+                    items={product.media} 
+                    onCardClick={() => setView({ type: 'detail', data: product })} 
+                  />
+                </div>
+                <div className="p-8 cursor-pointer" onClick={() => setView({ type: 'detail', data: product })}>
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="font-bold text-xl mb-1 group-hover:text-indigo-600 transition-colors">{product.title}</h3>
+                      <span className="text-xs font-bold text-slate-400 tracking-widest uppercase">{product.code || 'KOD BELİRTİLMEDİ'}</span>
+                    </div>
+                    <span className="text-indigo-600 font-black text-xl">{product.price} ₺</span>
+                  </div>
+                  <p className="text-slate-500 text-sm line-clamp-2 leading-relaxed">{product.description}</p>
+                </div>
+                {isAdminLoggedIn && (
+                  <div className="px-8 pb-8 flex gap-3 justify-end">
+                    <button onClick={() => { setEditingProduct(product); setFormData(product); setIsModalOpen(true); }} className="p-3 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all"><Edit3 size={18} /></button>
+                    <button onClick={async () => { if(confirm('Bu ürünü silmek istediğinize emin misiniz?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', product.id)) }} className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={18} /></button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </main>
+        </>
+      ) : (
+        /* Detay Sayfası */
+        <main className="max-w-6xl mx-auto px-4 py-12">
+          <button onClick={() => setView({ type: 'list', data: null })} className="flex items-center gap-2 text-slate-500 font-bold mb-10 hover:text-indigo-600 transition-colors group">
+            <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" /> Listeye Geri Dön
+          </button>
+          
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
             <div className="space-y-6">
-              <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest">
-                {view.data.code || 'KODSUZ'}
-              </span>
-              <h1 className="text-4xl font-black tracking-tight text-slate-900">{view.data.title}</h1>
-              <div className="text-3xl font-black text-blue-600">{view.data.price} ₺</div>
-              <p className="text-slate-500 leading-relaxed whitespace-pre-wrap bg-white p-6 rounded-2xl border border-slate-100">
-                {view.data.desc || 'Bu ürün için açıklama bulunmuyor.'}
-              </p>
+              {view.data.media?.map((m, i) => (
+                <div key={i} className="rounded-[2.5rem] overflow-hidden bg-black shadow-2xl">
+                  {m.type === 'video' ? (
+                    <video src={m.url} controls className="w-full aspect-video outline-none" />
+                  ) : (
+                    <img 
+                      src={m.url} 
+                      alt="" 
+                      className="w-full h-auto object-cover" 
+                      onError={(e) => { e.target.src = "https://via.placeholder.com/800x600?text=Resim+Yuklenemedi"; }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            <div className="sticky top-28 h-fit space-y-8">
+              <div>
+                <div className="inline-block bg-indigo-50 text-indigo-600 px-4 py-1.5 rounded-full text-xs font-black tracking-widest uppercase mb-4">
+                  Stok Kodu: {view.data.code || 'BELİRTİLMEDİ'}
+                </div>
+                <h1 className="text-5xl font-black tracking-tight mb-4">{view.data.title}</h1>
+                <div className="text-4xl font-black text-indigo-600">{view.data.price} ₺</div>
+              </div>
+
+              <div className="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm">
+                <h4 className="font-bold text-slate-400 uppercase text-xs tracking-widest mb-4">Ürün Bilgileri</h4>
+                <p className="text-slate-600 leading-loose text-lg whitespace-pre-wrap">{view.data.description || 'Açıklama girilmemiş.'}</p>
+              </div>
+              
+              <button onClick={handleShare} className="w-full py-5 bg-slate-900 text-white rounded-[1.5rem] font-bold flex items-center justify-center gap-3 hover:bg-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-slate-200">
+                <Share2 size={24} /> Ürünü Paylaş
+              </button>
             </div>
           </div>
         </main>
       )}
 
-      {/* Giriş Modalı */}
-      {showLogin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="bg-white p-8 rounded-[2rem] w-full max-w-xs text-center shadow-2xl scale-in-center">
-            <h2 className="font-black mb-6 text-slate-800">YÖNETİCİ GİRİŞİ</h2>
-            <input 
-              type="password" 
-              autoFocus 
-              className="w-full p-4 bg-slate-50 rounded-2xl border outline-none focus:ring-2 ring-blue-100 text-center mb-4 font-bold" 
-              placeholder="Şifre" 
-              value={pass} 
-              onChange={e=>setPass(e.target.value)} 
-            />
-            <div className="flex gap-2">
-              <button onClick={() => { setShowLogin(false); setPass(''); }} className="flex-1 py-3 text-slate-400 font-bold hover:text-slate-600">İptal</button>
-              <button 
-                onClick={() => { 
-                  if(pass === ADMIN_PASSWORD) { 
-                    setIsAdmin(true); 
-                    setShowLogin(false); 
-                    setPass(''); 
-                  } else {
-                    alert('Hatalı şifre!');
-                  }
-                }} 
-                className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors"
-              >
-                Giriş
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Ekle/Düzenle Modalı */}
+      {/* Kayıt Modalı */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="font-black text-xl text-slate-800">{formData.id ? 'ÜRÜNÜ DÜZENLE' : 'YENİ ÜRÜN EKLE'}</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X/></button>
-            </div>
-            <form onSubmit={handleSave} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 ml-2 uppercase tracking-widest">Ürün Adı *</label>
-                <input required className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 ring-blue-100" placeholder="Örn: Premium Mavi Gömlek" value={formData.title} onChange={e=>setFormData({...formData, title:e.target.value})} />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md">
+          <div className="bg-white rounded-[3rem] w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl relative scrollbar-hide">
+            {isSubmitting && (
+              <div className="absolute inset-0 z-[200] bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-[3rem]">
+                <Loader2 className="animate-spin text-indigo-600 w-12 h-12 mb-4" />
+                <p className="font-bold text-lg">Buluta Kaydediliyor...</p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 ml-2 uppercase tracking-widest">Ürün Kodu</label>
-                  <input className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 ring-blue-100 uppercase" placeholder="KOD-001" value={formData.code} onChange={e=>setFormData({...formData, code:e.target.value})} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 ml-2 uppercase tracking-widest">Fiyat (TL) *</label>
-                  <input required className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:ring-2 ring-blue-100 font-bold text-blue-600" placeholder="1.250" value={formData.price} onChange={e=>setFormData({...formData, price:e.target.value})} />
-                </div>
+            )}
+            
+            <div className="p-10">
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-3xl font-black">{editingProduct ? 'Ürünü Düzenle' : 'Yeni Ürün'}</h2>
+                <button onClick={closeModal} className="p-3 hover:bg-slate-100 rounded-full transition-colors"><X size={24} /></button>
               </div>
-              
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 ml-2 uppercase tracking-widest">Ürün Fotoğrafları</label>
-                <div className="border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center bg-slate-50/50">
-                  <input type="file" multiple accept="image/*" onChange={async (e) => {
-                    const files = Array.from(e.target.files || []);
-                    const newMedia = [];
-                    for(let f of files) {
-                      const reader = new FileReader();
-                      const promise = new Promise(res => {
-                        reader.onload = (re) => res(re.target?.result);
-                        reader.readAsDataURL(f);
-                      });
-                      const result = await promise;
-                      if (result) newMedia.push({ url: result, type: 'image' });
-                    }
-                    setFormData(prev => ({...prev, media: [...prev.media, ...newMedia]}));
-                  }} className="hidden" id="fup" />
-                  <label htmlFor="fup" className="cursor-pointer flex flex-col items-center gap-2 text-slate-400 font-bold text-xs hover:text-blue-600 transition-colors">
-                    <ImageIcon size={32} strokeWidth={1.5}/>
-                    <span>FOTOĞRAF SEÇ VEYA SÜRÜKLE</span>
-                  </label>
+
+              {/* Boyut Çubuğu */}
+              <div className="mb-8 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                 <div className="flex justify-between items-center mb-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ürün Kapasitesi (Max 1MB)</span>
+                    <span className={`text-[10px] font-black ${sizePercentage > 85 ? 'text-red-500' : 'text-indigo-600'}`}>%{sizePercentage.toFixed(1)}</span>
+                 </div>
+                 <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div className={`h-full transition-all duration-500 ${sizePercentage > 85 ? 'bg-red-500' : 'bg-indigo-600'}`} style={{ width: `${sizePercentage}%` }}></div>
+                 </div>
+                 {sizePercentage > 80 && (
+                   <div className="flex items-center gap-2 mt-2 text-red-500">
+                     <AlertTriangle size={12} />
+                     <span className="text-[9px] font-bold">Doküman sınırı dolmak üzere! Lütfen link kullanmayı deneyin.</span>
+                   </div>
+                 )}
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Ürün Başlığı</label>
+                  <input required placeholder="Ürün adını giriniz" className="w-full p-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-indigo-500" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Katalog Kodu</label>
+                    <input placeholder="KLT-XXX" className="w-full p-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-indigo-500" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Fiyat (₺)</label>
+                    <input 
+                      required
+                      placeholder="0" 
+                      className="w-full p-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-indigo-500 font-bold" 
+                      value={formData.price} 
+                      onChange={e => setFormData({...formData, price: formatPrice(e.target.value)})} 
+                    />
+                  </div>
+                </div>
+
+                <div className="p-8 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 text-center">
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Görsel ve Video Yönetimi</p>
+                  <div className="flex justify-center flex-wrap gap-4 mb-6">
+                    <button type="button" onClick={() => addMediaByLink('image')} className="p-4 bg-white rounded-2xl shadow-sm hover:text-indigo-600 transition-all flex flex-col items-center gap-2 w-24">
+                      <LinkIcon size={24} /><span className="text-[9px] font-black uppercase">RESİM LİNK</span>
+                    </button>
+                    <label className="p-4 bg-white rounded-2xl shadow-sm hover:text-indigo-600 cursor-pointer flex flex-col items-center gap-2 w-24">
+                      <Upload size={24} /><span className="text-[9px] font-black uppercase">DOSYA YÜKLE</span>
+                      <input type="file" multiple accept="image/*" className="hidden" onChange={e => handleFileUpload(e, 'image')} />
+                    </label>
+                    <button type="button" onClick={() => addMediaByLink('video')} className="p-4 bg-white rounded-2xl shadow-sm hover:text-indigo-600 transition-all flex flex-col items-center gap-2 w-24">
+                      <Video size={24} /><span className="text-[9px] font-black uppercase">VİDEO LİNK</span>
+                    </button>
+                    <label className="p-4 bg-white rounded-2xl shadow-sm hover:text-indigo-600 cursor-pointer flex flex-col items-center gap-2 w-24">
+                      <Video size={24} /><span className="text-[9px] font-black uppercase">VİDEO YÜKLE</span>
+                      <input type="file" accept="video/*" className="hidden" onChange={e => handleFileUpload(e, 'video')} />
+                    </label>
+                  </div>
                   
                   {formData.media.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-6 justify-center">
-                      {formData.media.map((m,i) => (
-                        <div key={i} className="relative w-16 h-16 group">
-                          <img src={m.url} className="w-full h-full object-cover rounded-xl border border-slate-200" alt="" />
-                          <button 
-                            type="button" 
-                            onClick={() => setFormData({...formData, media: formData.media.filter((_,idx)=>idx!==i)})} 
-                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors"
-                          >
-                            <X size={12}/>
-                          </button>
+                    <div className="flex flex-wrap gap-3 justify-center">
+                      {formData.media.map((m, i) => (
+                        <div key={i} className="relative w-20 h-20 rounded-2xl overflow-hidden group shadow-md border-2 border-white">
+                          {m.type === 'video' ? <div className="w-full h-full bg-black flex items-center justify-center text-white text-[10px] font-bold">VİDEO</div> : <img src={m.url} className="w-full h-full object-cover" />}
+                          <button type="button" onClick={() => setFormData({...formData, media: formData.media.filter((_, idx) => idx !== i)})} className="absolute inset-0 bg-red-600/90 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all"><Trash2 size={20} /></button>
                         </div>
                       ))}
                     </div>
                   )}
+                  {isUploading && <div className="mt-4 text-[10px] font-black text-indigo-600 flex items-center justify-center gap-2 animate-pulse"><Loader2 className="animate-spin" size={14} /> MEDYALAR İŞLENİYOR...</div>}
                 </div>
-              </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 ml-2 uppercase tracking-widest">Açıklama</label>
-                <textarea className="w-full p-4 bg-slate-50 border rounded-2xl h-24 outline-none focus:ring-2 ring-blue-100" placeholder="Ürün detaylarını buraya yazın..." value={formData.desc} onChange={e=>setFormData({...formData, desc:e.target.value})} />
-              </div>
-              
-              <button className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black tracking-widest shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all transform active:scale-[0.98]">
-                {formData.id ? 'DEĞİŞİKLİKLERİ KAYDET' : 'ÜRÜNÜ YAYINLA'}
-              </button>
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Ürün Detayları</label>
+                  <textarea placeholder="Özellikler, ölçüler vb..." rows="4" className="w-full p-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-indigo-500 resize-none" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}></textarea>
+                </div>
+
+                <button type="submit" disabled={isUploading || isSubmitting} className="w-full py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black text-lg shadow-xl shadow-indigo-100 hover:bg-indigo-700 disabled:bg-slate-300 transition-all flex items-center justify-center gap-2 active:scale-95">
+                  {isSubmitting ? <Loader2 className="animate-spin" /> : editingProduct ? 'GÜNCELLE' : 'KATALOĞA EKLE'}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Login Modalı */}
+      {showLoginModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/95 backdrop-blur-xl">
+          <div className="bg-white rounded-[3rem] p-10 w-full max-w-md shadow-2xl">
+            <div className="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-6 text-indigo-600">
+              <Lock size={32} />
+            </div>
+            <h2 className="text-3xl font-black mb-2 text-center">Admin Girişi</h2>
+            <p className="text-slate-400 text-center mb-8 text-sm">Düzenleme yapmak için şifre giriniz.</p>
+            <form onSubmit={e => { e.preventDefault(); if(passwordInput === ADMIN_PASSWORD) { setIsAdminLoggedIn(true); setShowLoginModal(false); setPasswordInput(''); } else alert('Hatalı Şifre!'); }} className="space-y-4">
+              <input type="password" placeholder="••••" autoFocus className="w-full p-5 bg-slate-100 rounded-2xl outline-none text-center text-3xl tracking-[0.5em] focus:ring-2 focus:ring-indigo-500" value={passwordInput} onChange={e => setPasswordInput(e.target.value)} />
+              <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black hover:bg-black transition-all">PANELİ AÇ</button>
+              <button type="button" onClick={() => setShowLoginModal(false)} className="w-full text-slate-400 text-sm font-bold pt-2 uppercase tracking-widest">Kapat</button>
             </form>
           </div>
         </div>
